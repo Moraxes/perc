@@ -1,6 +1,7 @@
 extern crate clap;
 extern crate rand;
 extern crate time;
+extern crate gnuplot;
 
 mod program_args;
 
@@ -20,6 +21,7 @@ fn main() {
     Some("train-ada") => train_cmd(args.subcommand_matches("train-ada").unwrap(), true),
     Some("gen") => gen_cmd(args.subcommand_matches("gen").unwrap()),
     Some("validate") => validate_cmd(args.subcommand_matches("validate").unwrap()),
+    Some("plot") => plot_cmd(args.subcommand_matches("plot").unwrap()),
     Some(_) | None => unreachable!(),
   }
 }
@@ -232,4 +234,51 @@ fn validate_cmd<'a>(args: &clap::ArgMatches<'a>) {
     }
   }
   println!("{} errors.", errors);
+}
+
+fn plot_cmd<'a>(args: &clap::ArgMatches<'a>) {
+  use gnuplot::{Figure, Color, PointSymbol};
+
+  let samples_path = args.value_of("samples").unwrap();
+  let samples_str = file_to_string(samples_path);
+  let samples = samples_str.lines().map(|l| l.split_whitespace().map(|tok| f32::from_str(tok).unwrap()).collect::<Vec<f32>>()).collect::<Vec<_>>();
+  let model_path = args.value_of("model").unwrap();
+  let model_str = file_to_string(model_path);
+  let model: Vec<f32> = model_str.split_whitespace().map(|tok| f32::from_str(tok).unwrap()).collect();
+
+  let signed = args.is_present("bipolar");
+
+  let samples_0_x = samples.iter().filter(|t| t[2] == 0.0 || t[2] == -1.0).map(|t| t[0]).collect::<Vec<_>>();
+  let samples_0_y = samples.iter().filter(|t| t[2] == 0.0 || t[2] == -1.0).map(|t| t[1]).collect::<Vec<_>>();
+  let samples_1_x = samples.iter().filter(|t| t[2] == 1.0).map(|t| t[0]).collect::<Vec<_>>();
+  let samples_1_y = samples.iter().filter(|t| t[2] == 1.0).map(|t| t[1]).collect::<Vec<_>>();
+  let model_x = if signed {
+    vec![
+      -1.0f32,
+      1.0f32,
+    ]
+  } else {
+    vec![
+      0.0f32,
+      1.0f32,
+    ]
+  };
+  let model_y = if signed {
+    vec! [
+      model[0]/model[1] - model[2]/model[1],
+      -model[0]/model[1] - model[2]/model[1],
+    ]
+  } else {
+    vec! [
+      -model[2]/model[1],
+      -model[0]/model[1] - model[2]/model[1],
+    ]
+  };
+
+  let mut fg = Figure::new();
+  fg.axes2d()
+    .points(&samples_0_x, &samples_0_y, &[Color("red"), PointSymbol('O')])
+    .points(&samples_1_x, &samples_1_y, &[Color("green"), PointSymbol('O')])
+    .lines(&model_x, &model_y, &[Color("black")]);
+  fg.show();
 }
