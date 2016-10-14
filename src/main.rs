@@ -65,27 +65,33 @@ fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[
   let max_epochs = usize::from_str(args.value_of("epochs").unwrap()).unwrap();
   let train_rate = f32::from_str(args.value_of("train_rate").unwrap()).unwrap();
   let signed = args.is_present("bipolar");
+  let adaline_threshold = f32::from_str(args.value_of("termination_threshold").unwrap_or("0.0")).unwrap();
 
   for epoch in 0..max_epochs {
     for (example, label) in inputs.iter().zip(outputs) {
-      let out = if !adaline {
-        eval(&weights[..], &[example.0, example.1], signed)
-      } else {
+      let out = if adaline {
         get_net(&weights[..], &[example.0, example.1])
+      } else {
+        eval(&weights[..], &[example.0, example.1], signed)
       };
-      let err = label - out;
+      let err = (label - out).powi(2);
+      println!("{}, {}, {}", out, label, err);
       weights[0] += train_rate * err * example.0;
       weights[1] += train_rate * err * example.1;
       weights[2] += train_rate * err;  // there is no example.2, it's the bias input
     }
     let mut total_err = 0f32;
     for (example, label) in inputs.iter().zip(outputs) {
-      let out = eval(&weights[..], &[example.0, example.1], signed);
-      total_err += (label - out).abs();
+      let out = if adaline {
+        get_net(&weights[..], &[example.0, example.1])
+      } else {
+        eval(&weights[..], &[example.0, example.1], signed)
+      };
+      total_err += (label - out).powi(2);
     }
     println!("Epoch {}: {:?}, total error {}.", epoch, weights, total_err);
 
-    if total_err == 0f32 {
+    if (adaline && total_err.abs() < adaline_threshold) || total_err == 0f32 {
       println!("Model cannot be improved; terminating.");
       break;
     }
