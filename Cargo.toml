@@ -1,0 +1,9 @@
+[package]
+name = "perc"
+version = "0.1.0"
+authors = ["maciej"]
+
+[dependencies]
+rand = "0.3"
+time = "0.1"
+clap = "2"
