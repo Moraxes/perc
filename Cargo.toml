@@ -7,3 +7,4 @@ authors = ["maciej"]
 rand = "0.3"
 time = "0.1"
 clap = "2"
+gnuplot = "*"

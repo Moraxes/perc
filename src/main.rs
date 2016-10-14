@@ -74,8 +74,7 @@ fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[
       } else {
         eval(&weights[..], &[example.0, example.1], signed)
       };
-      let err = (label - out).powi(2);
-      println!("{}, {}, {}", out, label, err);
+      let err = label - out;
       weights[0] += train_rate * err * example.0;
       weights[1] += train_rate * err * example.1;
       weights[2] += train_rate * err;  // there is no example.2, it's the bias input
@@ -87,9 +86,10 @@ fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[
       } else {
         eval(&weights[..], &[example.0, example.1], signed)
       };
-      total_err += (label - out).powi(2);
+      total_err += if adaline { (label - out).powi(2) } else { (label - out).abs() };
     }
-    println!("Epoch {}: {:?}, total error {}.", epoch, weights, total_err);
+    total_err /= inputs.len() as f32 * if signed { 2.0 } else { 1.0 };
+    println!("Epoch {}: {:?}, total error {} (normalized).", epoch, weights, total_err);
 
     if (adaline && total_err.abs() < adaline_threshold) || total_err == 0f32 {
       println!("Model cannot be improved; terminating.");
