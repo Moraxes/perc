@@ -36,23 +36,79 @@ fn train_cmd<'a>(args: &clap::ArgMatches<'a>, adaline: bool) {
   let mut inputs = training_set.iter().map(|triple| (triple[0], triple[1])).collect::<Vec<(f32, f32)>>();
   let outputs = training_set.iter().map(|triple| triple[2]).collect::<Vec<f32>>();
 
-  let model = train(args, &mut inputs[..], &outputs[..], adaline);
-
-  match args.value_of("output") {
-    None => println!("{} {} {}", model.0, model.1, model.2),
-    Some(fname) => {
-      let path = Path::new(fname);
-      let display = path.display();
-      let mut file = match File::create(&path) {
-        Err(e) => panic!("couldn't open file {} for writing: {}", display, e.description()),
-        Ok(f) => f,
-      };
-      match writeln!(file, "{} {} {}", model.0, model.1, model.2) {
-        Err(e) => panic!("couldn't write to file {}: {}", display, e.description()),
-        Ok(_) => {},
-      }
-    },
+  let mut logs = Vec::new();
+  let runs = usize::from_str(args.value_of("runs").unwrap()).unwrap();
+  let mut model = (0f32, 0f32, 0f32);
+  for _ in 0..runs {
+    let mut log = Vec::new();
+    model = train(args, &mut inputs[..], &outputs[..], adaline, &mut log);
+    logs.push(log);
   }
+
+  if runs == 1 {
+    match args.value_of("output") {
+      None => println!("{} {} {}", model.0, model.1, model.2),
+      Some(fname) => {
+        let path = Path::new(fname);
+        let display = path.display();
+        let mut file = match File::create(&path) {
+          Err(e) => panic!("couldn't open file {} for writing: {}", display, e.description()),
+          Ok(f) => f,
+        };
+        match writeln!(file, "{} {} {}", model.0, model.1, model.2) {
+          Err(e) => panic!("couldn't write to file {}: {}", display, e.description()),
+          Ok(_) => {},
+        }
+      },
+    }
+  } else if runs > 1 {
+    match args.value_of("output") {
+      None => println!("need to specify --output along with --runs"),
+      Some(fname) => {
+        let path = Path::new(fname);
+        let display = path.display();
+        let mut file = match File::create(&path) {
+          Err(e) => panic!("couldn't open file {} for writing: {}", display, e.description()),
+          Ok(f) => f,
+        };
+        let post_logs = postprocess_logs(logs);
+        for (mu, sigma) in post_logs {
+          match writeln!(file, "{},{}", mu, sigma) {
+            Err(e) => panic!("couldn't write to file {}: {}", display, e.description()),
+            Ok(_) => {},
+          }
+        }
+      },
+    }
+  }
+}
+
+fn postprocess_logs(mut logs: Vec<Vec<f32>>) -> Vec<(f32, f32)> {
+  let max_len = logs.iter().map(|v| v.len()).max().unwrap();
+  for mut v in &mut logs {
+    let last = *v.last().unwrap();
+    while v.len() < max_len {
+      v.push(last);
+    }
+  }
+
+  let runs = logs.len() as f32;
+  let mut means: Vec<f32> = Vec::with_capacity(max_len);
+  let mut stddevs: Vec<f32> = Vec::with_capacity(max_len);
+  unsafe { means.set_len(max_len) };
+  unsafe { stddevs.set_len(max_len) };
+  for it in 0..max_len {
+    means[it] = logs.iter().map(|v| v[it]).sum::<f32>() / runs;
+  }
+  for it in 0..max_len {
+    stddevs[it] = logs.iter()
+      .map(|v| v[it] - means[it])
+      .map(|x| x * x / runs)
+      .fold(0f32, |acc, x| acc + x)
+      .sqrt();
+  }
+
+  means.iter().cloned().zip(stddevs.iter().cloned()).collect()
 }
 
 fn get_rng() -> rand::XorShiftRng {
@@ -61,7 +117,7 @@ fn get_rng() -> rand::XorShiftRng {
   XorShiftRng::from_seed(unsafe { transmute::<[u64; 2], [u32; 4]>([time::precise_time_ns(), time::precise_time_ns()]) })
 }
 
-fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[f32], adaline: bool) -> Model {
+fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[f32], adaline: bool, train_log: &mut Vec<f32>) -> Model {
   let mut rng = get_rng();
   let mut weights = init_weights(args, &mut rng);
   let max_epochs = usize::from_str(args.value_of("epochs").unwrap()).unwrap();
@@ -92,6 +148,7 @@ fn train<'a>(args: &clap::ArgMatches<'a>, inputs: &mut [(f32, f32)], outputs: &[
     }
     total_err /= inputs.len() as f32 * if signed { 2.0 } else { 1.0 };
     println!("Epoch {}: {:?}, total error {} (normalized).", epoch, weights, total_err);
+    train_log.push(total_err);
 
     if (adaline && total_err.abs() < adaline_threshold) || total_err == 0f32 {
       println!("Model cannot be improved; terminating.");
@@ -124,10 +181,16 @@ fn init_weights<'a, R: rand::Rng>(args: &clap::ArgMatches<'a>, rng: &mut R) -> V
       weights[2] = dist.ind_sample(rng) as f32;
     },
     "uniform" => {
-      let dist = range::Range::new(min_or_mean as f64, max_or_stddev as f64);
-      weights[0] = dist.ind_sample(rng) as f32;
-      weights[1] = dist.ind_sample(rng) as f32;
-      weights[2] = dist.ind_sample(rng) as f32;
+      if min_or_mean >= max_or_stddev {
+        weights[0] = min_or_mean;
+        weights[1] = min_or_mean;
+        weights[2] = min_or_mean;
+      } else {
+        let dist = range::Range::new(min_or_mean as f64, max_or_stddev as f64);
+        weights[0] = dist.ind_sample(rng) as f32;
+        weights[1] = dist.ind_sample(rng) as f32;
+        weights[2] = dist.ind_sample(rng) as f32;
+      }
     },
     _ => unreachable!(),
   }

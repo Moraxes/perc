@@ -69,7 +69,13 @@ pub fn get<'a>() -> ArgMatches<'a> {
       .takes_value(true)
       .validator(validator::<usize>)
       .default_value("5")
-      .help("Maximum number of epochs (training may be terminated earlier if the model can't be improved further)")
+      .help("Maximum number of epochs (training may be terminated earlier if the model can't be improved further)"),
+    Arg::with_name("runs")
+      .long("runs")
+      .takes_value(true)
+      .validator(validator::<usize>)
+      .default_value("1")
+      .help("Total runs")
   ];
 
   App::new("perc")
